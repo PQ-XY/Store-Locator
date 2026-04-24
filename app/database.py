@@ -1,6 +1,10 @@
+from collections.abc import Generator
+from typing import Annotated
+
+from fastapi import Depends
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from dotenv import load_dotenv
 import os
@@ -12,16 +16,26 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+def create_db_and_tables() -> None:
+    # Import models here so SQLAlchemy metadata is populated before create_all.
+    from app import models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
+
 # Dependency
-def get_db():
+def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
+# dependency annotation for route handlers to get a database session
+DBSession = Annotated[Session, Depends(get_db)]
+
 
 def check_db_connection() -> bool:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
     return True
+
