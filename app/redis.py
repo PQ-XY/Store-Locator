@@ -70,6 +70,12 @@ def cache_get_search(key: str) -> dict[str, Any] | None:
     return json.loads(data)
 
 
+def clear_search_cache() -> None:
+    """Remove all cached search results."""
+    for key in redis_client.scan_iter(f"{SEARCH_CACHE_KEY_PREFIX}*"):
+        redis_client.delete(key)
+
+
 # Rate limiting operations
 RATE_LIMIT_KEY_PREFIX = "rate_limit:"
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -229,7 +230,7 @@ def geocode_location(payload: StoreSearchRequest) -> GeocodeResult:
     )
 
     try:
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=10, context=ssl._create_unverified_context()) as response:
             payload_text = response.read().decode("utf-8")
     except (HTTPError, URLError) as exc:
         raise HTTPException(status_code=502, detail=f"Geocoding service unavailable: {exc}") from exc
