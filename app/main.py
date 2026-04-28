@@ -1,12 +1,13 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Path
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import text
+from sqlalchemy import and_, func, text
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from app.auth import require_permissions, router as auth_router
 from app.database import DBSession, create_db_and_tables
 from app.models import StoreService, StoreStatus, StoreType, Stores
 from app.redis import check_redis_connection, clear_search_cache
@@ -184,6 +185,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Store Locator API", lifespan=lifespan)
 app.include_router(search_router)
+app.include_router(auth_router)
 
 
 @app.get("/health")
@@ -259,23 +261,71 @@ def _geocode_store_location(payload: StoreCreateRequest) -> tuple[float, float]:
 
 
 @app.get("/api/admin/stores")
-def get_all_stores(db: DBSession) -> list[dict[str, str]]:
-    """Admin endpoint to retrieve all stores (for testing purposes)."""
-    result = db.execute(text("SELECT store_id, name FROM stores"))
-    return [{"store_id": row["store_id"], "name": row["name"]} for row in result]
+def list_stores(
+    db: DBSession,
+    _current_user=Depends(require_permissions("stores.read")),
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="store_id", pattern="^(store_id|name|status|created_at)$"),
+    status: StoreStatus | None = Query(default=None),
+) -> dict[str, object]:
+    """Admin endpoint to list stores with pagination and optional status filtering."""
+
+    filters = []
+    if status is not None:
+        filters.append(Stores.status == status)
+
+    where_clause = and_(*filters) if filters else None
+    sort_column = getattr(Stores, sort_by, Stores.store_id)
+
+    count_query = select(func.count(Stores.store_id))
+    data_query = (
+        select(Stores)
+        .options(selectinload(Stores.services))
+        .order_by(sort_column)
+        .limit(limit)
+        .offset(offset)
+    )
+
+    if where_clause is not None:
+        count_query = count_query.where(where_clause)
+        data_query = data_query.where(where_clause)
+
+    total_count = db.execute(count_query).scalar_one()
+    stores = db.execute(data_query).scalars().all()
+
+    page_count = (total_count + limit - 1) // limit if total_count else 0
+    current_page = (offset // limit) + 1 if total_count else 0
+
+    return {
+        "items": [_store_response(store) for store in stores],
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "page_count": page_count,
+            "current_page": current_page,
+        },
+    }
 
 @app.get("/api/admin/stores/{store_id}")
-def get_store_by_id(db: DBSession, store_id: str = Path(..., pattern=STORE_ID_PATTERN)) -> dict[str, str]:
-    """Admin endpoint to retrieve a store by ID (for testing purposes)."""
-    result = db.execute(text("SELECT store_id, name FROM stores WHERE store_id = :store_id"), {"store_id": store_id})
-    row = result.fetchone()
-    if row is None:
+def get_store_by_id(
+    db: DBSession,
+    _current_user=Depends(require_permissions("stores.read")),
+    store_id: str = Path(..., pattern=STORE_ID_PATTERN),
+) -> dict[str, object]:
+    """Admin endpoint to retrieve a single store by store_id."""
+    store = db.execute(
+        select(Stores).options(selectinload(Stores.services)).where(Stores.store_id == store_id)
+    ).scalar_one_or_none()
+    if store is None:
         raise HTTPException(status_code=404, detail="Store not found")
-    return {"store_id": row["store_id"], "name": row["name"]}
+    return _store_response(store)
 
 @app.patch("/api/admin/stores/{store_id}")
 def update_store(
     db: DBSession,
+    _current_user=Depends(require_permissions("stores.write")),
     store_id: str = Path(..., pattern=STORE_ID_PATTERN),
     payload: StorePartialUpdateRequest = ...,
 ) -> dict[str, object]:
@@ -325,7 +375,11 @@ def update_store(
     return _store_response(updated_store)
 
 @app.delete("/api/admin/stores/{store_id}")
-def delete_store(db: DBSession, store_id: str = Path(..., pattern=STORE_ID_PATTERN)) -> dict[str, str]:
+def delete_store(
+    db: DBSession,
+    _current_user=Depends(require_permissions("stores.write")),
+    store_id: str = Path(..., pattern=STORE_ID_PATTERN),
+) -> dict[str, str]:
     """Admin endpoint to deactivate a store by ID (soft delete)."""
     store = db.execute(select(Stores).where(Stores.store_id == store_id)).scalar_one_or_none()
     if store is None:
@@ -337,7 +391,11 @@ def delete_store(db: DBSession, store_id: str = Path(..., pattern=STORE_ID_PATTE
     return {"status": StoreStatus.INACTIVE.value, "store_id": store_id}
 
 @app.post("/api/admin/stores", status_code=201)
-def create_store(payload: StoreCreateRequest, db: DBSession) -> dict[str, object]:
+def create_store(
+    payload: StoreCreateRequest,
+    db: DBSession,
+    _current_user=Depends(require_permissions("stores.write")),
+) -> dict[str, object]:
     """Admin endpoint to create a new store with auto-geocoding when coordinates are missing."""
     try:
         latitude, longitude = _geocode_store_location(payload)

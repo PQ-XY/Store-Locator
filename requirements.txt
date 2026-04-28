@@ -6,3 +6,4 @@ python-dotenv
 bcrypt
 geopy
 redis>=5.0
+PyJWT>=2.8
