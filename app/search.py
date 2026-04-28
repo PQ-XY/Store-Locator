@@ -365,13 +365,22 @@ def _build_search_cache_key(
     dependencies=[Depends(enforce_search_rate_limit)],
 )
 def search_stores(
-    payload: StoreSearchRequest,
     db: DBSession,
+    address: str | None = Query(default=None),
+    postal_code: str | None = Query(default=None),
+    latitude: float | None = Query(default=None),
+    longitude: float | None = Query(default=None),
     radius_miles: float = Query(default=10, ge=1, le=100),
     services: list[str] = Query(default=[]),
     store_types: list[StoreType] = Query(default=[]),
     open_now: bool | None = Query(default=None),
 ) -> StoreSearchResponse:
+    payload = StoreSearchRequest(
+        address=address,
+        postal_code=postal_code,
+        latitude=latitude,
+        longitude=longitude,
+    )
     normalized_services = _validate_requested_services(services)
     location = geocode_location(payload)
 
