@@ -8,3 +8,4 @@ geopy
 redis>=5.0
 PyJWT>=2.8
 python-multipart>=0.0.9
+pandas>=2.2

@@ -1,9 +1,9 @@
 import argparse
-import csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
 from sqlalchemy import select
 
 from app.database import SessionLocal
@@ -192,19 +192,29 @@ def load_csv_rows(csv_path: Path) -> tuple[list[ParsedStoreRow], list[str]]:
     parsed_rows: list[ParsedStoreRow] = []
     errors: list[str] = []
 
-    with csv_path.open("r", newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        if reader.fieldnames != EXPECTED_HEADERS:
-            return [], [
-                "CSV headers do not match expected format exactly. "
-                f"Expected: {','.join(EXPECTED_HEADERS)}"
-            ]
+    try:
+        dataframe = pd.read_csv(
+            csv_path,
+            dtype=str,
+            keep_default_na=False,
+            encoding="utf-8-sig",
+        )
+    except Exception as exc:
+        return [], [f"Failed to parse CSV: {exc}"]
 
-        for index, row in enumerate(reader, start=2):
-            try:
-                parsed_rows.append(parse_row(index, row))
-            except ValueError as exc:
-                errors.append(f"row {index}: {exc}")
+    if list(dataframe.columns) != EXPECTED_HEADERS:
+        return [], [
+            "CSV headers do not match expected format exactly. "
+            f"Expected: {','.join(EXPECTED_HEADERS)}"
+        ]
+
+    for idx, row in dataframe.iterrows():
+        row_number = idx + 2
+        row_dict = {column: str(row[column]) for column in EXPECTED_HEADERS}
+        try:
+            parsed_rows.append(parse_row(row_number, row_dict))
+        except ValueError as exc:
+            errors.append(f"row {row_number}: {exc}")
 
     return parsed_rows, errors
 

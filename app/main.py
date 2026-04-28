@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-import csv
 import io
 
 import bcrypt
+import pandas as pd
 from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import and_, func, text
@@ -615,8 +615,16 @@ async def import_stores_csv(
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded") from exc
 
-    reader = csv.DictReader(io.StringIO(text_content))
-    if reader.fieldnames != CSV_IMPORT_HEADERS:
+    try:
+        dataframe = pd.read_csv(
+            io.StringIO(text_content),
+            dtype=str,
+            keep_default_na=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {exc}") from exc
+
+    if list(dataframe.columns) != CSV_IMPORT_HEADERS:
         raise HTTPException(
             status_code=400,
             detail={
@@ -639,12 +647,13 @@ async def import_stores_csv(
     failed: list[dict[str, object]] = []
     seen_store_ids: set[str] = set()
     geocoded_coordinates: dict[str, tuple[float, float]] = {}
-    total_rows_processed = 0
+    total_rows_processed = len(dataframe.index)
 
-    for row_number, row in enumerate(reader, start=2):
-        total_rows_processed += 1
+    for index, row in dataframe.iterrows():
+        row_number = index + 2
+        row_dict = {column: str(row[column]) for column in CSV_IMPORT_HEADERS}
         try:
-            payload = _build_store_create_request_from_csv_row(row)
+            payload = _build_store_create_request_from_csv_row(row_dict)
             if payload.store_id in seen_store_ids:
                 raise ValueError(f"duplicate store_id '{payload.store_id}' in CSV")
             seen_store_ids.add(payload.store_id)
