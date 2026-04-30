@@ -9,3 +9,7 @@ redis>=5.0
 PyJWT>=2.8
 python-multipart>=0.0.9
 pandas>=2.2
+pytest>=7.0
+pytest-asyncio>=0.21
+httpx>=0.24
+pytest-cov>=4.0

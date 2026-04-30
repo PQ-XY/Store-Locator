@@ -14,7 +14,7 @@ from urllib.request import urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from geopy.distance import geodesic
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -375,12 +375,15 @@ def search_stores(
     store_types: list[StoreType] = Query(default=[]),
     open_now: bool | None = Query(default=None),
 ) -> StoreSearchResponse:
-    payload = StoreSearchRequest(
-        address=address,
-        postal_code=postal_code,
-        latitude=latitude,
-        longitude=longitude,
-    )
+    try:
+        payload = StoreSearchRequest(
+            address=address,
+            postal_code=postal_code,
+            latitude=latitude,
+            longitude=longitude,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     normalized_services = _validate_requested_services(services)
     location = geocode_location(payload)
 
