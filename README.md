@@ -23,6 +23,46 @@ This project provides two API surfaces:
 
 Authentication and authorization are implemented with JWT tokens and DB-backed role/permission checks.
 
+## System Diagram
+
+```mermaid
+flowchart LR
+  subgraph Clients
+    PUB[Public Client]
+    ADM[Admin Client]
+  end
+
+  PUB -->|POST /api/stores/search| APP
+  ADM -->|Auth + Admin APIs| APP
+
+  subgraph Application[FastAPI Application]
+    APP[app.main]
+    AUTH[Auth Router\napp.auth]
+    SEARCH[Search Router\napp.search]
+    STORE[Store Admin Endpoints]
+    USER[User Admin Endpoints]
+    IMPORT[CSV Import Endpoint]
+  end
+
+  APP --> AUTH
+  APP --> SEARCH
+  APP --> STORE
+  APP --> USER
+  APP --> IMPORT
+
+  AUTH -->|JWT validation + refresh token lookup| DB[(PostgreSQL)]
+  STORE -->|CRUD stores/services| DB
+  USER -->|CRUD users/roles/permissions| DB
+  IMPORT -->|Upsert stores from CSV| DB
+  SEARCH -->|Bounding box query + filters| DB
+
+  SEARCH <-->|Geocode cache + search cache\nRate limit counters| REDIS[(Redis)]
+  SEARCH -->|Address/ZIP geocoding| NOM[Nominatim API]
+
+  DB -->|SQLAlchemy ORM| APP
+  REDIS -->|Caching + rate limiting| APP
+```
+
 ## Framework Choice
 
 ### Why FastAPI
