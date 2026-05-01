@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from typing import Any
 
@@ -11,6 +12,14 @@ load_dotenv()
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
+CACHE_EVENTS_ENABLED = os.getenv("CACHE_EVENTS_ENABLED", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+logger = logging.getLogger(__name__)
 
 # Initialize Redis connection pool
 redis_client = redis.Redis(
@@ -36,10 +45,18 @@ def check_redis_connection() -> bool:
 GEOCODE_CACHE_KEY_PREFIX = "geocode:"
 
 
+def _emit_cache_event(operation: str, cache_key: str) -> None:
+    """Emit cache operation notifications when enabled."""
+    if not CACHE_EVENTS_ENABLED:
+        return
+    logger.info("[cache] %s %s", operation, cache_key)
+
+
 def cache_set_geocode(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
     """Store geocoding result in Redis."""
     cache_key = f"{GEOCODE_CACHE_KEY_PREFIX}{key}"
     redis_client.setex(cache_key, ttl_seconds, json.dumps(value))
+    _emit_cache_event("set", cache_key)
 
 
 def cache_get_geocode(key: str) -> dict[str, Any] | None:
@@ -47,7 +64,9 @@ def cache_get_geocode(key: str) -> dict[str, Any] | None:
     cache_key = f"{GEOCODE_CACHE_KEY_PREFIX}{key}"
     data = redis_client.get(cache_key)
     if data is None:
+        _emit_cache_event("miss", cache_key)
         return None
+    _emit_cache_event("hit", cache_key)
     return json.loads(data)
 
 
@@ -59,6 +78,7 @@ def cache_set_search(key: str, value: dict[str, Any], ttl_seconds: int) -> None:
     """Store search result in Redis."""
     cache_key = f"{SEARCH_CACHE_KEY_PREFIX}{key}"
     redis_client.setex(cache_key, ttl_seconds, json.dumps(value))
+    _emit_cache_event("set", cache_key)
 
 
 def cache_get_search(key: str) -> dict[str, Any] | None:
@@ -66,7 +86,9 @@ def cache_get_search(key: str) -> dict[str, Any] | None:
     cache_key = f"{SEARCH_CACHE_KEY_PREFIX}{key}"
     data = redis_client.get(cache_key)
     if data is None:
+        _emit_cache_event("miss", cache_key)
         return None
+    _emit_cache_event("hit", cache_key)
     return json.loads(data)
 
 
@@ -74,6 +96,7 @@ def clear_search_cache() -> None:
     """Remove all cached search results."""
     for key in redis_client.scan_iter(f"{SEARCH_CACHE_KEY_PREFIX}*"):
         redis_client.delete(key)
+        _emit_cache_event("clear", key)
 
 
 # Rate limiting operations
