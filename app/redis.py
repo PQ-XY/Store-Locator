@@ -20,6 +20,15 @@ CACHE_EVENTS_ENABLED = os.getenv("CACHE_EVENTS_ENABLED", "false").lower() in {
 }
 
 logger = logging.getLogger(__name__)
+# Ensure logger outputs to console with proper handler
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 # Initialize Redis connection pool
 redis_client = redis.Redis(
